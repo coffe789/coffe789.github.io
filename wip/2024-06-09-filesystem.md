@@ -1,0 +1,191 @@
+---
+layout: post
+title:  "A short introduction to filesystems"
+date:   2024-06-09 20:33:25 +1000
+# categories: jekyll update
+---
+
+Even the most novice computer users are somewhat familiar with the filesystem. As we all know, the only necessary applications on a personal computer are the web browser for emails and the file explorer for pictures of your cat. Cats aside, my point is that we deal with filesystems on a daily basis, but like many ordinary things we don't question how they work. So in this article I'm going to do a bit of research, and I will try to present a technical overview of what happens when you open a file, delving down from the application level, all the way down to your physical storage device.
+
+## Preamble - What is a filesystem?
+A filesystem is not your file explorer. It is fair to say that it is part of it, but it certainly isn't required if you're just trying to meet the definition. In the most abstract sense a filesystem is some protocol that allows you to read and/or write data in an organized fashion. We usually expect some additional abstractions on top of this, such as the ability to create directories, name chunks of data with human-readable strings, and to delete said chunks of data. These characteristics would make a filesystem more recognisable to us, but not all filesystems are striving for your recognition. We will touch upon some more abstract filesystems, but in this article we are mostly concerned about disk filesystems, such as ext4, fat, and ntfs. These are the conventional kind you most likely use on your workstation.
+
+In Linux the filesystem is broken up into three categories:
+
+1. **Physical filesystem**
+
+    The physical filesystem describes how data is stored on a physical volume. For example a FAT volume may have a boot sector, root directory, allocation table, and data area. Somewhere on the disk are well-defined data structures, in known locations, that describe things such as file names, sizes, and the physical locations of their data contents.
+
+2. **Virtual filesystem**
+
+    The virtual filesystem (VFS) is a software layer designed to enable multiple instances of physical filesystems, that can all be accessed using a single interface. Say you are the creator of the FAT filesystem; in order to make it usable on Linux you need to write code for the VFS that understands where things physically exist on a FAT volume, and provides functions needed by the VFS such as mount, open file, get permissions, etc.
+
+3. **Logical filesystem**
+
+    The logical filesystem is the user application-facing API that provides functions such as open(), read(), mkdir(), etc. You can consider these as wrappers for a small subset of functions in the VFS. The reason this is exists is so the application does not need to directly access the Linux kernel data/functions of the VFS. This protects the integrity of the kernel, but also makes it simpler for the user who does not care about the cumbersome API/implementation details.
+
+The discrete layers used in Linux are of course just one way of implementing a filesystem. If we didn't care about supporting many filesystems, we could strip away the virtual filesystem, and shift the rest of the responsibility to the logical filesystem layer. Ultimately we just need some protocol/conceptual idea of where information is stored in a volume (the physical filesystem), and software that reads/writes to the volume while conforming to the protocol (the logical filesystem).
+
+## Physical filesystems
+
+Somewhere in between the logical filesystem and the physical volume is usually a device driver that toggles all the right hardware pins to let you write to your storage device. One might argue that drivers and hardware do not have a place in a discussion about filesystems which are hardware-agnostic, but I'm still including them in this discussion because I think it is interesting to examine where hardware has influenced the design of filesystems (and where it surprisingly hasn't).
+
+## What can a filesystem do?
+- Distributed
+- Authentication
+- Encryption
+- I assume we are agnostic to file extensions
+- 
+
+## What does a filesystem look like in memory, and how do we interface it with code?
+- File descriptors or whatever
+- C code -> machine code
+- Does the OS use the filesystem in a different way to me?
+
+### Notes
+Things to maybe explore:
+- Also has online file system growth
+- HTree indexing for large directories
+- Sparse files
+- capnproto (not for this post)
+- Playing with partitions in a sandbox/emulator
+- RAID levels
+- Flash translation layer
+
+FAT (https://web.archive.org/web/20060819215504/http://osdev.berlios.de/osd-fs.html#fat):
+- File allocation table
+- Associated with DOS and some versions of windows (old)
+- VFAT (virtual FAT) is FAT with long filenames
+- You format a disk with a filesystem
+    - Boot sector: Code to run the DOS kernel. Bios Parameter Block (BPB) has disk geometry and filesystem info (it's just parameters).
+    - root directory
+    - one or more copies of the FAT
+    - data area (files and subdirectories)
+- We have boot sectors, total sectors, hidden sectors, FATS, heads, tracks
+- Directory names have a fixed width of 8, padded with spaces. Must be all caps
+- Directory entries have 32 bytes. Have many times/dates, filesize, file extension (so we aren't agnostic), starting cluster
+- cluster index variable is a u16 in FAT16, and a u32 in FAT32. Not sure why max cluster amount is only 4M then for FAT32.
+- The width of a FAT entry is 12 (FAT12) 16 (FAT16) 32 (FAT32).
+- The FAT format used is determined solely by the number of clusters in the volume.
+
+Other:
+- Some filenames have defined character sets. eg VFAT & FAT32 use UCS-2 Unicode. Interestingly this is not defined for ext2. The endianess seems to actually be defined though, as little endian for all of the FATS, and for ext2.
+
+FAT32 limitations (https://www.partitionwizard.com/partitionmanager/fat32-partition-size-limit.html):
+- Max filesize of 4GB
+- Max partition size 2TB. But Windows Disk Management will only help you format 32GB. Would be interesting to learn why.
+- No file permissions
+- NTFS and exFAT are widely used in removable storage devices
+- Microsoft recently (~2019) published the exFAT (extended FAT) spec. Now can have it on Linux. Used to be proprietary and expensive to get a license.
+- It sounds like NTFS is still proprietary, but linux has had working drivers (reverse engineered) for it for a long time (~2006). Microsoft is not happy but they can't sue for reasons. (Source https://unix.stackexchange.com/questions/393258/is-ntfs-proprietary-and-what-does-that-mean)
+
+Dave FAT32 https://www.youtube.com/watch?v=bikbJPI-7Kg
+- First you partition, then you format the partition you care about
+- Formatting logically splits the disk up into different parts. Apparently with older disks this could be physical (magnetic)
+- We used to have to care about the actual disk geometry, platters, cylinders, whatever. Now we just abstract all that away and care about sectors.
+- Disk is divided into clusters. In FAT32 you have a limit of ~4M clusters. This means the bigger your disk is, the bigger your clusters have to be. Meaning small files can take up a ton of space (cluster slack).
+- Dave was working with a 16MB memory card for testing. He picked 32GB as a limit because it seemed pretty big, and he thought the decision would be temporary (only for NT4.0). To be fair you should not be using huge filesystems on FAT32. Apparently xFAT is HUGE, and can have cluster sizes of 32MB. xFAT is proprietary by microsoft, and licensed out to hardware people.
+- If you have a small amount of files, you don't really care about cluster slack.
+- Microsoft still hasn't changed it. Maybe because they know it hasn't been tested on a lot of devices and they are scared of breaking things?
+
+HDD internals (https://www.youtube.com/watch?v=oEORcCQ62nQ)
+- HDD will stop working when you open it up, hence it is sealed
+- There are multiple disks (platters) stacked on top of each other, for maximum storage
+- The actuator (read-write arm) is like a comb. Each part is called a read-write head, and goes through the platters to hover over them. They do not touch, but they are **very** close. The arm moves so fast the human eye can't keep track of it.
+- The "tracks" on each platter are concentric rings
+- A "sector" is a portion of a track. For example if there were two sectors per track, each sector would take up 180 degrees.
+- The "spindle" is a motor that holds the platters
+- A "cylinder" is a collection of all tracks that have the same radius (since there are multiple platters). It makes sense that we care about these because in older HDDs the heads did not move independently, they all point to the same (x,y) position on their respective platters. In newer designs the heads can move independently, so this concept is not as useful.
+
+GPT:
+- A sector is smallest unit of data that can be read from or written to a disk. Determined in hardware.
+- A "cluster" is the minimum amount you can allocate for a filesystem (because allocating per byte would be dumb). There is a tradeoff here. Smaller cluster size means less potentially wasted space (slack space), but more overhead since there are more sectors to manage, and more risk of fragmentation. Typically the cluster size should be a multiple of the sector size. A cluster is contiguous memory, eg the sectors it consists of are right next to each other; the number of sectors per cluster is always a power of 2 (FAT webarchive source)
+
+PTECH FAT (https://www.pctechguide.com/hard-disks/file-systems-fat-fat8-fat16-fat32-and-ntfs-explained):
+This generally seems like a great source.
+- FAT12 was the original, from MS-DOS in 1981
+- the FAT (table) is essentially an array of pointers of linked lists, where each linked list contains a different file
+- FAT12 only supported 8MB partitions, so it was superseded in 1984 (only 3yrs) by FAT16 which bumped it up to 2GB.
+- Main limitation of FAT is there are a fixed maximum number of clusters per partition. Does not scale well with cluster slack.
+- FAT16 is the most widely supported between other OSes. It has many extensions that do things like fixing the 8.3 max filename
+- NTFS was introduced on Windows NT in 1993. The article mentions it was also on Windows XP (2001) for whatever reason. It add access control, encryption of files/folders, and it is able to recover from damage.
+
+Geeks for Geeks Linux Filesystem (https://www.geeksforgeeks.org/linux-file-system/ ):
+- Linux filesystem comprises of 3 layers:
+    - Logical filesystem: Interface between user applications and the filesystem. Open/read/close/etc files.
+    - Virtual filesystem: Facilitate the concurrent operation of multiple physical file systems by having a standard interface.
+    - Physical filesystem: Responsible for the tangible management and storage of physical memory blocks.
+- "Journaling" file system log changes made to a file but yet yet committed to disk. This prevents losing changes when power goes out or whatever.
+- Some filesystems store old versions of files as a backup. Not sure what layer this occurs on? Feels like an OS thing.
+- "Inode" or index node is the representation of any file or directory
+- the "ext" filesystem was made in 1992, specifically designed for linux
+- "ext2" was made in 1993. Solved some problems I guess. Apparently slow to boot if there was an unclean shutdown, because there is no journaling.
+- "ext3" adds journaling so faster to boot. Also has online file system growth(??) and HTree indexing for large directories(??)
+- "xfs" is 64-bit, has journaling, and was ported to linux from (???) in 2001. It is the default for many distros. Has features like snapshots, online defragmentation, sparse files, variable block sizes, good capacity. Also good add parallel I/O operations.
+- "ext4" Made in 2006. Has Journaling, backward compatibility with ext2/3, has persistent preallocation, unlimited number of subdirectories, metadata checksumming, large filesize. Also common on linux distros.
+- btfrs. Default filesystem for fedora.
+- bcachefs. Upcoming rookie, announced in 2015. Seems neat https://bcachefs.org/. They are transitioning to rust LOL.
+- ext4 limitations: Does not guarantee the integrity of your data if the data is corrupted while already on the disk. Cannot secure deletion of files; sensitive data ends up in the file-system journal.
+- btrfs limitations: Does not perform the best in many common use cases. Several of its features can be buggy and result in reduced performance and data loss.
+
+https://youtu.be/HdEozE2gN9I chris titus
+- windows filesystem is hot garbage, slow (would be nice to find benchmarks), fragments worse somehow
+- @momi_V:
+    ext4: basic functionality, little configuration, low overhead
+    btrfs: advanced features (checksums, compression, RAID), mostly for personal use (not as well tested as zfs)
+    zfs: lots of features, great reliability but complicated and resource intensive
+- zfs has features and is reliable, but not native on linux for licensing reasons
+
+kernel.org
+- The VFS implements syscalls like open, stat, chmod
+- A pathname is passed to the VFS, and it uses it to search through the dcache (dentries)
+- dcache only ever lives in RAM. It only exists for performance
+- a dentry is basically just a pointer to an inode. An inode is typically on the disc
+- If you want to change an inode, you load it into memory, edit it, and then write it back.
+- If you use the `stat` system call, parts of the inode are copied over to userspace
+- `Open`ing a file requires the allocation of a file structure (kernel-side implementation of file descriptor).
+- let the vfs know about the filesystem with `register`, which contains a struct. Contains func pointers that lets the VFS mount and "kill".
+- mount function supplied to the vfs must return the root dentry
+
+Memory rabbit hole:
+- DRAM is dynamic because it recharges the capacitors thousands of times per second. It is asynchronous to the system clock. Used in older/cheaper systems
+- SDRAM is synchronous DRAM. Being in sync with the clock makes it faster. Used as main memory in modern computers. Different types. SDR (single data rate) transfers data once per clock cycle. DDR (double data rate) transfers twice per clock cycle.
+- SRAM is static RAM. Does not need to be refreshed. Very fast, used in L1,L2,L3 cache
+- SSDs are optimised for sequential access (because they are NAND flash), rather than random access. Sequential access is generally faster than random because you don't need to keep changing the address you are interested in.
+- SSDs use NAND flash rather than NOR flash. NAND is very dense, and cheaper per bit. NOR is faster at reading, and NAND is faster at writing. NOR is random access, NAND is sequential access.
+- Solid state storage is any storage that doesn't have moving parts, which is most storage nowadays.
+- Problems with SSDs:
+    - Write amplification: More writes are being used than are necessary. For example if the OS does things in smaller chunks than the SSD can dealwith, eg does a bunch of 4k writes to a 128k sector, the SSD will do way more work than it actually has to.
+    - Read disturb error: Every time you do a read, there is a small chance you corrupt data
+    - Write endurance: There is a maximum number of writes/erases per sector before things become unreliable
+    - Garbage collection: Block are reclaimed that have invalid data. Runs in the background. Can have performance impacts if it's doing a lot. Contributes to endurance degredation because it is copying stuff all over the place.
+    - Thermal throttling: Error rate increases with temperature. We can intentionally reduce performance at high temps to keep error rate within acceptable margins.
+    - Write cliff: SSDs have reserved memory to better distribute writes (over-provisioning). When this runs out write performance plummets. Can be mitigated with more over-provisioning, and smarter garbage collection.
+    - Uncorrectable errors: SSDs get worse as they get older. Their controllers have ECC (error correction code), but eventually the errors get bad enough that the code can't deal with them anymore.
+
+https://linux-kernel-labs.github.io/refs/heads/master/labs/filesystems_part1.html
+- Filesystems can be grouped into disk, network, and virtual filesystems
+- The VFS is the tree you navigate in your terminal/file explorer. In linux it starts at `/`. If you mount a filesystem to the VFS, it appears in a subdirectory of the VFS.
+- To work with the VFS, a filesystem needs to be reduced to several entities: superblock, inode, file, dentry. These have metdata and a bunch of functions.
+- superblock: Stores the information needed for a mounted file system. There is generally something on the disk that corresponds to this:
+    - inode and block locations
+    - file system block size
+    - max filename length
+    - max file size
+    - location of root inode
+- inode: Keeps information about a file, or anything that can be abstracted as a file. There is genearlly something on the disk that corresponds to this.
+    - file type, size
+    - access rights
+    - access/modify time
+    - location of data on disk
+    - does not store name. Name is stored by dentry. This way a file can have multiple names (hardlinks)
+    - if it is a directory it can point to its child inodes
+- file: Only exists in memory, has no physical correspondant on the disk. This is what an application process sees.
+    - file cursor position
+    - file opening rights ("rwba")
+    - pointer to associated inode
+- dentry: associates an inode with a filename
+    - an integer that identifies the inode
+    - a string representing the name of the dentry
+    - a pointer to the parent dentry
+- Linux supports about 50 filesystems, but on a single system it is unlikely there will be more than 5-6. So filesystems can be loaded/unloaded as modules. This can be done by an application, by creating a struct, and doing a syscall.
